@@ -7,7 +7,7 @@ app.use(express.json());
 
 // Configuration
 const GIVEBUTTER_WEBHOOK_SECRET = process.env.GIVEBUTTER_WEBHOOK_SECRET;
-const CIVICRM_BASE_URL = process.env.CIVICRM_BASE_URL; // e.g., https://yoursite.org
+const CIVICRM_BASE_URL = process.env.CIVICRM_BASE_URL;
 const CIVICRM_SITE_KEY = process.env.CIVICRM_SITE_KEY;
 const CIVICRM_API_KEY = process.env.CIVICRM_API_KEY;
 
@@ -60,6 +60,7 @@ async function civiCRMApi(entity, action, params) {
     throw error;
   }
 }
+
 // Find or create contact
 async function findOrCreateContact(data) {
   console.log('🔍 Searching for contact:', data.email);
@@ -84,7 +85,6 @@ async function findOrCreateContact(data) {
     ...(data.phone && { phone: data.phone })
   });
   
-  // CiviCRM APIv3 returns ID in multiple possible locations
   const contactId = createResult.id || 
                     (createResult.values && createResult.values[0] && createResult.values[0].id) ||
                     (createResult.values && Object.keys(createResult.values)[0]);
@@ -100,35 +100,33 @@ async function createContribution(contactId, transaction) {
   
   // Map Givebutter custom field values to CiviCRM Financial Type IDs
   const financialTypeMapping = {
-	'MKP USA':49,
-	'Central Plains':18,
-	'Chicago':19,
-	'Colorado':20,
-	'Florida':21,
-	'Greater Carolinas':23,
-	'Hawaii':25,
-	'Heartland':139,
-	'Intermountain':28,
-	'Metro NY Tri-State':36,
-	'Mid Atlantic':24,
-	'Mid America':27,
-	'New England':34,
-	'Northern California':40,
-	'Northwest':41,
-	'Philadelphia':42,
-	'Southern California':31,
-	'South Central':51,
-	'South East':22,
-	'Southwest':17,
-	'St. Louis':45,
-	'Upstate New York':46,
-	'Wisconsin':48,
-	
-	
+    'MKP USA': 49,
+    'Central Plains': 18,
+    'Chicago': 19,
+    'Colorado': 20,
+    'Florida': 21,
+    'Greater Carolinas': 23,
+    'Hawaii': 25,
+    'Heartland': 139,
+    'Intermountain': 28,
+    'Metro NY Tri-State': 36,
+    'Mid Atlantic': 24,
+    'Mid America': 27,
+    'New England': 34,
+    'Northern California': 40,
+    'Northwest': 41,
+    'Philadelphia': 42,
+    'Southern California': 31,
+    'South Central': 51,
+    'South East': 22,
+    'Southwest': 17,
+    'St. Louis': 45,
+    'Upstate New York': 46,
+    'Wisconsin': 48
   };
   
   // Find the "Local Area" custom field value
-  let financialTypeId = 1; // Default to ID 1 if no match
+  let financialTypeId = 49; // Default to MKP USA if no match
   
   if (transaction.custom_fields && transaction.custom_fields.length > 0) {
     const localAreaField = transaction.custom_fields.find(
@@ -137,14 +135,14 @@ async function createContribution(contactId, transaction) {
     
     if (localAreaField && localAreaField.value) {
       console.log('📍 Found custom field value:', localAreaField.value);
-      financialTypeId = financialTypeMapping[localAreaField.value] || 1;
+      financialTypeId = financialTypeMapping[localAreaField.value] || 49;
       console.log('💳 Using Financial Type ID:', financialTypeId);
     }
   }
   
   const contributionData = {
     contact_id: contactId,
-    financial_type_id: financialTypeId, // Now uses mapped value
+    financial_type_id: financialTypeId,
     total_amount: transaction.amount,
     receive_date: transaction.transacted_at || new Date().toISOString(),
     source: `Givebutter: ${transaction.campaign_title || transaction.campaign_id || 'Unknown Campaign'}`,
@@ -234,10 +232,20 @@ app.post('/test', async (req, res) => {
       amount: 25,
       transacted_at: new Date().toISOString(),
       campaign_id: 'test-campaign',
+      campaign_title: 'Test Campaign',
       first_name: 'Test',
       last_name: 'Donor',
-      email: 'test@example.com',
-      phone: '555-1234'
+      email: 'testdonor@example.com',
+      phone: '555-1234',
+      custom_fields: [
+        {
+          id: 20768768,
+          field_id: 64260,
+          title: 'Local Area',
+          type: 'radio',
+          value: 'Colorado'  // Change this to test different areas
+        }
+      ]
     };
     
     const contactId = await findOrCreateContact(testData);
@@ -262,7 +270,7 @@ app.post('/test', async (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`\n🚀 Webhook server running on port ${PORT}`);
-  console.log(`🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}');
+  console.log(`🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}`);
   console.log('📍 Endpoints:');
   console.log('   POST /webhook/givebutter - Receive webhooks');
   console.log('   GET  /health - Health check');
