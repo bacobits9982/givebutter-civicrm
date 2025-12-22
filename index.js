@@ -100,10 +100,6 @@ async function createContribution(contactId, transaction) {
   
   // Map Givebutter custom field values to CiviCRM Financial Type IDs
   const financialTypeMapping = {
-    : 1,           // Replace with your actual IDs
-    'Local Area 1': 2,      // Replace with your actual IDs
-    'Local Area 2': 3,      // Replace with your actual IDs
-	
 	'MKP USA':49,
 	'Central Plains':18,
 	'Chicago':19,
@@ -117,7 +113,7 @@ async function createContribution(contactId, transaction) {
 	'Mid Atlantic':24,
 	'Mid America':27,
 	'New England':34,
-	'Northern California;:40,
+	'Northern California':40,
 	'Northwest':41,
 	'Philadelphia':42,
 	'Southern California':31,
@@ -235,7 +231,7 @@ app.post('/test', async (req, res) => {
   try {
     const testData = {
       id: 'test_' + Date.now(),
-      amount: 2500,
+      amount: 25,
       transacted_at: new Date().toISOString(),
       campaign_id: 'test-campaign',
       first_name: 'Test',
@@ -266,7 +262,7 @@ app.post('/test', async (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`\n🚀 Webhook server running on port ${PORT}`);
-  console.log('🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}');
+  console.log(`🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}');
   console.log('📍 Endpoints:');
   console.log('   POST /webhook/givebutter - Receive webhooks');
   console.log('   GET  /health - Health check');
