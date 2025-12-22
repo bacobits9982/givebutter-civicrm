@@ -98,12 +98,60 @@ async function findOrCreateContact(data) {
 async function createContribution(contactId, transaction) {
   console.log('💰 Creating contribution for contact:', contactId);
   
+  // Map Givebutter custom field values to CiviCRM Financial Type IDs
+  const financialTypeMapping = {
+    : 1,           // Replace with your actual IDs
+    'Local Area 1': 2,      // Replace with your actual IDs
+    'Local Area 2': 3,      // Replace with your actual IDs
+	
+	'MKP USA':49,
+	'Central Plains':18,
+	'Chicago':19,
+	'Colorado':20,
+	'Florida':21,
+	'Greater Carolinas':23,
+	'Hawaii':25,
+	'Heartland':139,
+	'Intermountain':28,
+	'Metro NY Tri-State':36,
+	'Mid Atlantic':24,
+	'Mid America':27,
+	'New England':34,
+	'Northern California;:40,
+	'Northwest':41,
+	'Philadelphia':42,
+	'Southern California':31,
+	'South Central':51,
+	'South East':22,
+	'Southwest':17,
+	'St. Louis':45,
+	'Upstate New York':46,
+	'Wisconsin':48,
+	
+	
+  };
+  
+  // Find the "Local Area" custom field value
+  let financialTypeId = 1; // Default to ID 1 if no match
+  
+  if (transaction.custom_fields && transaction.custom_fields.length > 0) {
+    const localAreaField = transaction.custom_fields.find(
+      field => field.title === 'Local Area' || field.field_id === 64260
+    );
+    
+    if (localAreaField && localAreaField.value) {
+      console.log('📍 Found custom field value:', localAreaField.value);
+      financialTypeId = financialTypeMapping[localAreaField.value] || 1;
+      console.log('💳 Using Financial Type ID:', financialTypeId);
+    }
+  }
+  
   const contributionData = {
     contact_id: contactId,
-    financial_type_id: 1,
+    financial_type_id: financialTypeId, // Now uses mapped value
     total_amount: transaction.amount,
     receive_date: transaction.transacted_at || new Date().toISOString(),
-    source: `Givebutter: ${transaction.campaign_id || 'Unknown Campaign'}`,
+    source: `Givebutter: ${transaction.campaign_title || transaction.campaign_id || 'Unknown Campaign'}`,
     trxn_id: transaction.id,
     invoice_id: transaction.id,
     contribution_status_id: 1,
@@ -114,7 +162,6 @@ async function createContribution(contactId, transaction) {
   
   const result = await civiCRMApi('Contribution', 'create', contributionData);
   
-  // CiviCRM APIv3 returns ID in multiple possible locations
   const contributionId = result.id || 
                         (result.values && result.values[0] && result.values[0].id) ||
                         (result.values && Object.keys(result.values)[0]);
