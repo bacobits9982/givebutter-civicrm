@@ -101,7 +101,7 @@ async function createContribution(contactId, transaction) {
   const contributionData = {
     contact_id: contactId,
     financial_type_id: 1,
-    total_amount: transaction.amount / 100,
+    total_amount: transaction.amount,
     receive_date: transaction.transacted_at || new Date().toISOString(),
     source: `Givebutter: ${transaction.campaign_id || 'Unknown Campaign'}`,
     trxn_id: transaction.id,
