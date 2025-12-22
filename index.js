@@ -207,7 +207,7 @@ app.post('/test', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n🚀 Webhook server running on port ${PORT}`);
-  console.log('🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}`);
+  console.log('🔗 CiviCRM endpoint: ${CIVICRM_REST_URL}');
   console.log('📍 Endpoints:');
   console.log('   POST /webhook/givebutter - Receive webhooks');
   console.log('   GET  /health - Health check');
