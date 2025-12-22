@@ -43,7 +43,7 @@ async function civiCRMApi(entity, action, params) {
   try {
     console.log(`📡 CiviCRM API call: ${entity}.${action}`);
     
-    const response = await axios.get(CIVICRM_REST_URL, {
+    const response = await axios.post(CIVICRM_REST_URL, null, {
       params: {
         entity: entity,
         action: action,
@@ -60,7 +60,6 @@ async function civiCRMApi(entity, action, params) {
     throw error;
   }
 }
-
 // Find or create contact
 async function findOrCreateContact(data) {
   console.log('🔍 Searching for contact:', data.email);
