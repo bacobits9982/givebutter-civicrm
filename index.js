@@ -70,9 +70,10 @@ async function findOrCreateContact(data) {
     sequential: 1
   });
   
-  if (searchResult.count > 0) {
-    console.log('✅ Found existing contact:', searchResult.values[0].id);
-    return searchResult.values[0].id;
+  if (searchResult.count > 0 && searchResult.values && searchResult.values.length > 0) {
+    const contactId = searchResult.values[0].id || searchResult.values[0].contact_id;
+    console.log('✅ Found existing contact:', contactId);
+    return contactId;
   }
   
   console.log('➕ Creating new contact');
@@ -84,8 +85,14 @@ async function findOrCreateContact(data) {
     ...(data.phone && { phone: data.phone })
   });
   
-  console.log('✅ Created new contact:', createResult.id);
-  return createResult.id;
+  // CiviCRM APIv3 returns ID in multiple possible locations
+  const contactId = createResult.id || 
+                    (createResult.values && createResult.values[0] && createResult.values[0].id) ||
+                    (createResult.values && Object.keys(createResult.values)[0]);
+  
+  console.log('✅ Created new contact:', contactId);
+  console.log('📋 Full response:', JSON.stringify(createResult, null, 2));
+  return contactId;
 }
 
 // Create contribution
@@ -108,7 +115,13 @@ async function createContribution(contactId, transaction) {
   
   const result = await civiCRMApi('Contribution', 'create', contributionData);
   
-  console.log('✅ Created contribution:', result.id);
+  // CiviCRM APIv3 returns ID in multiple possible locations
+  const contributionId = result.id || 
+                        (result.values && result.values[0] && result.values[0].id) ||
+                        (result.values && Object.keys(result.values)[0]);
+  
+  console.log('✅ Created contribution:', contributionId);
+  console.log('📋 Full response:', JSON.stringify(result, null, 2));
   return result;
 }
 
