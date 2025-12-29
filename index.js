@@ -7,6 +7,7 @@ app.use(express.json());
 
 // Configuration
 const GIVEBUTTER_WEBHOOK_SECRET = process.env.GIVEBUTTER_WEBHOOK_SECRET;
+const GIVEBUTTER_API_KEY = process.env.GIVEBUTTER_API_KEY;
 const CIVICRM_BASE_URL = process.env.CIVICRM_BASE_URL;
 const CIVICRM_SITE_KEY = process.env.CIVICRM_SITE_KEY;
 const CIVICRM_API_KEY = process.env.CIVICRM_API_KEY;
@@ -38,6 +39,29 @@ function verifyGivebutterSignature(req, res, next) {
   }
 }
 
+// Fetch plan details from Givebutter API
+async function getGivebutterPlan(planId) {
+  if (!planId || !GIVEBUTTER_API_KEY) {
+    return null;
+  }
+  
+  try {
+    console.log('📡 Fetching plan details from Givebutter:', planId);
+    
+    const response = await axios.get(`https://api.givebutter.com/v1/plans/${planId}`, {
+      headers: {
+        'Authorization': `Bearer ${GIVEBUTTER_API_KEY}`
+      }
+    });
+    
+    console.log('✅ Got plan details:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to fetch plan from Givebutter:', error.response?.data || error.message);
+    return null;
+  }
+}
+
 // CiviCRM API helper for Drupal 7 (APIv3)
 async function civiCRMApi(entity, action, params) {
   try {
@@ -65,18 +89,15 @@ async function civiCRMApi(entity, action, params) {
 async function findOrCreateContact(data) {
   console.log('🔍 Searching for contact:', data.email);
   
-  // Search with return fields to get custom fields
   const searchResult = await civiCRMApi('Contact', 'get', {
     email: data.email,
     sequential: 1,
-    return: 'id,display_name,custom_820'  // custom_820 is the local_area_820 field
+    return: 'id,display_name,custom_820'
   });
   
   if (searchResult.count > 0 && searchResult.values && searchResult.values.length > 0) {
     const contact = searchResult.values[0];
     const contactId = contact.id || contact.contact_id;
-    
-    // Extract local area from contact record
     const storedLocalArea = contact.custom_820 || null;
     
     console.log('✅ Found existing contact:', contactId);
@@ -106,11 +127,10 @@ async function findOrCreateContact(data) {
                     (createResult.values && Object.keys(createResult.values)[0]);
   
   console.log('✅ Created new contact:', contactId);
-  console.log('📋 Full response:', JSON.stringify(createResult, null, 2));
   
   return {
     id: contactId,
-    localArea: null  // New contact has no stored local area
+    localArea: null
   };
 }
 
@@ -121,12 +141,124 @@ async function updateContactLocalArea(contactId, localArea) {
   try {
     await civiCRMApi('Contact', 'create', {
       id: contactId,
-      custom_820: localArea  // Update the local_area_820 field
+      custom_820: localArea
     });
     console.log('✅ Contact Local Area updated');
   } catch (error) {
     console.error('❌ Failed to update contact Local Area:', error);
-    // Don't throw - we still want to create the contribution
+  }
+}
+
+// Create or renew membership
+async function createOrRenewMembership(contactId, contributionId, transaction, frequency) {
+  console.log('👥 Checking membership for contact:', contactId);
+  console.log('📊 Frequency:', frequency);
+  
+  // Determine membership type based on frequency and is_recurring
+  let membershipTypeId;
+  let membershipDuration;
+  
+  if (!transaction.is_recurring) {
+    // One-time donation = Annual Non-Renewing
+    membershipTypeId = 11;
+    membershipDuration = { years: 1 };
+    console.log('💳 One-time donation → Type 11 (Annual Non-Renewing)');
+  } else if (frequency === 'monthly') {
+    // Monthly recurring = Monthly Renewing Membership
+    membershipTypeId = 10;
+    membershipDuration = { months: 1 };
+    console.log('💳 Monthly recurring → Type 10 (Monthly Renewing)');
+  } else if (frequency === 'yearly' || frequency === 'annual') {
+    // Annual recurring = Annual Renewing Membership
+    membershipTypeId = 9;
+    membershipDuration = { years: 1 };
+    console.log('💳 Annual recurring → Type 9 (Annual Renewing)');
+  } else if (frequency === 'quarterly') {
+    // Quarterly - treat as monthly for now
+    membershipTypeId = 10;
+    membershipDuration = { months: 3 };
+    console.log('💳 Quarterly recurring → Type 10 (Monthly Renewing, 3 months)');
+  } else {
+    // Default to annual non-renewing if we can't determine
+    membershipTypeId = 11;
+    membershipDuration = { years: 1 };
+    console.log('⚠️  Unknown frequency, defaulting to Type 11 (Annual Non-Renewing)');
+  }
+  
+  try {
+    // Check if contact has an existing membership of this type
+    const existingMembership = await civiCRMApi('Membership', 'get', {
+      contact_id: contactId,
+      membership_type_id: membershipTypeId,
+      sequential: 1,
+      options: { limit: 1, sort: 'end_date DESC' }
+    });
+    
+    const today = new Date();
+    let startDate = new Date();
+    let endDate = new Date();
+    
+    // Calculate end date based on duration
+    if (membershipDuration.years) {
+      endDate.setFullYear(startDate.getFullYear() + membershipDuration.years);
+    } else if (membershipDuration.months) {
+      endDate.setMonth(startDate.getMonth() + membershipDuration.months);
+    }
+    
+    let membershipData = {
+      contact_id: contactId,
+      membership_type_id: membershipTypeId,
+      source: `Givebutter: ${transaction.campaign_title || transaction.campaign_id}`,
+      contribution_id: contributionId
+    };
+    
+    if (existingMembership.count > 0) {
+      const existingId = existingMembership.values[0].id;
+      const existingEndDate = new Date(existingMembership.values[0].end_date);
+      
+      console.log('🔄 Renewing existing membership:', existingId);
+      
+      // If membership hasn't expired yet, extend from end date
+      if (existingEndDate > today) {
+        startDate = new Date(existingEndDate);
+        startDate.setDate(startDate.getDate() + 1);
+        endDate = new Date(startDate);
+        
+        if (membershipDuration.years) {
+          endDate.setFullYear(endDate.getFullYear() + membershipDuration.years);
+        } else if (membershipDuration.months) {
+          endDate.setMonth(endDate.getMonth() + membershipDuration.months);
+        }
+      }
+      
+      membershipData.id = existingId;
+      membershipData.start_date = startDate.toISOString().split('T')[0];
+      membershipData.end_date = endDate.toISOString().split('T')[0];
+      membershipData.status_id = 1;
+      
+    } else {
+      console.log('➕ Creating new membership');
+      
+      membershipData.join_date = today.toISOString().split('T')[0];
+      membershipData.start_date = startDate.toISOString().split('T')[0];
+      membershipData.end_date = endDate.toISOString().split('T')[0];
+      membershipData.status_id = 1;
+    }
+    
+    console.log('📝 Membership data:', membershipData);
+    
+    const result = await civiCRMApi('Membership', 'create', membershipData);
+    
+    const membershipId = result.id || 
+                        (result.values && result.values[0] && result.values[0].id) ||
+                        (result.values && Object.keys(result.values)[0]);
+    
+    console.log('✅ Membership created/renewed:', membershipId);
+    return membershipId;
+    
+  } catch (error) {
+    console.error('❌ Failed to create/renew membership:', error);
+    return null;
   }
 }
 
@@ -136,7 +268,6 @@ async function createContribution(contactInfo, transaction) {
   console.log('📋 Campaign ID:', transaction.campaign_id);
   console.log('📋 Campaign Title:', transaction.campaign_title);
   
-  // Financial type mapping for "Local Area" custom field
   const localAreaMapping = {
     'MKP USA': 49,
     'Central Plains': 18,
@@ -163,24 +294,17 @@ async function createContribution(contactInfo, transaction) {
     'Wisconsin': 48
   };
   
-  // Campaign-specific financial type mapping
   const campaignFinancialTypeMapping = {
-    '195519': 'use_custom_field',  // Main campaign - use Local Area custom field
-    // Add other campaigns here:
-    // '123456': 1,  // Example: Different campaign uses Financial Type ID 1
+    '195519': 'use_custom_field'
   };
   
-  let financialTypeId = 49; // Default to MKP USA
+  let financialTypeId = 49;
   let localAreaValue = null;
   let shouldUpdateContact = false;
   
-  // Check if this campaign has specific mapping
   const campaignMapping = campaignFinancialTypeMapping[transaction.campaign_id];
   
   if (campaignMapping === 'use_custom_field') {
-    // This is the main campaign - use Local Area custom field
-    
-    // First, check if Local Area was provided in the transaction
     if (transaction.custom_fields && transaction.custom_fields.length > 0) {
       const localAreaField = transaction.custom_fields.find(
         field => field.title === 'Local Area' || field.field_id === 64260
@@ -190,39 +314,33 @@ async function createContribution(contactInfo, transaction) {
         localAreaValue = localAreaField.value;
         console.log('📍 Found Local Area in transaction:', localAreaValue);
         
-        // If contact doesn't have this local area stored, we should update it
         if (!contactInfo.localArea || contactInfo.localArea !== localAreaValue) {
           shouldUpdateContact = true;
         }
       }
     }
     
-    // If no Local Area in transaction, use the one from contact record
     if (!localAreaValue && contactInfo.localArea) {
       localAreaValue = contactInfo.localArea;
       console.log('📍 Using stored Local Area from contact:', localAreaValue);
     }
     
-    // Update contact record if needed
     if (shouldUpdateContact && localAreaValue) {
       await updateContactLocalArea(contactInfo.id, localAreaValue);
     }
     
-    // Map the local area value to financial type ID
     if (localAreaValue) {
       financialTypeId = localAreaMapping[localAreaValue] || 49;
       console.log('💳 Using Financial Type ID:', financialTypeId, 'for Local Area:', localAreaValue);
     } else {
-      console.log('⚠️  No Local Area found in transaction or contact record, using default:', financialTypeId);
+      console.log('⚠️  No Local Area found, using default:', financialTypeId);
     }
     
   } else if (campaignMapping) {
-    // Use the specified financial type for this campaign
     financialTypeId = campaignMapping;
     console.log('💳 Using Financial Type ID from campaign mapping:', financialTypeId);
   } else {
-    // Campaign not in mapping - use default
-    console.log('⚠️  Campaign not in mapping, using default Financial Type ID:', financialTypeId);
+    console.log('⚠️  Campaign not in mapping, using default:', financialTypeId);
   }
   
   const contributionData = {
@@ -246,7 +364,22 @@ async function createContribution(contactInfo, transaction) {
                         (result.values && Object.keys(result.values)[0]);
   
   console.log('✅ Created contribution:', contributionId);
-  console.log('📋 Full response:', JSON.stringify(result, null, 2));
+  
+  // Create/renew membership for campaign 195519
+  if (transaction.campaign_id === '195519') {
+    let frequency = null;
+    
+    // Fetch plan details if this is a recurring donation
+    if (transaction.plan_id) {
+      const planDetails = await getGivebutterPlan(transaction.plan_id);
+      if (planDetails && planDetails.frequency) {
+        frequency = planDetails.frequency;
+      }
+    }
+    
+    await createOrRenewMembership(contactInfo.id, contributionId, transaction, frequency);
+  }
+  
   return result;
 }
 
@@ -270,7 +403,7 @@ app.post('/webhook/givebutter', verifyGivebutterSignature, async (req, res) => {
       
       const contribution = await createContribution(contactInfo, data);
       
-      console.log('🎉 SUCCESS! Contribution created:', contribution.id);
+      console.log('🎉 SUCCESS! Contribution created');
       console.log('===================================\n');
       
       res.status(200).json({ 
@@ -300,6 +433,7 @@ app.get('/health', (req, res) => {
     civicrm_endpoint: CIVICRM_REST_URL,
     config: {
       hasGivebutterSecret: !!GIVEBUTTER_WEBHOOK_SECRET,
+      hasGivebutterApiKey: !!GIVEBUTTER_API_KEY,
       hasCiviCRMUrl: !!CIVICRM_BASE_URL,
       hasSiteKey: !!CIVICRM_SITE_KEY,
       hasApiKey: !!CIVICRM_API_KEY
@@ -316,23 +450,23 @@ app.post('/test', async (req, res) => {
       id: 'test_' + Date.now(),
       amount: 25,
       transacted_at: new Date().toISOString(),
-      campaign_id: '195519',  // Use main campaign to test local area logic
+      campaign_id: '195519',
       campaign_title: 'Test Campaign',
       first_name: 'Test',
       last_name: 'Donor',
       email: 'testdonor@example.com',
       phone: '555-1234',
-      // Uncomment to test with custom field provided:
+      is_recurring: true,
+      plan_id: null, // Set to actual plan ID to test
       custom_fields: [
         {
           id: 20768768,
           field_id: 64260,
           title: 'Local Area',
           type: 'radio',
-          value: 'Colorado'  // Change to test different areas
+          value: 'Colorado'
         }
       ]
-      // Comment out custom_fields to test database lookup
     };
     
     const contactInfo = await findOrCreateContact(testData);
@@ -344,8 +478,7 @@ app.post('/test', async (req, res) => {
     res.json({ 
       success: true, 
       message: 'Test donation created successfully',
-      contact_id: contactInfo.id,
-      contribution_id: contribution.id
+      contact_id: contactInfo.id
     });
   } catch (error) {
     console.error('❌ Test failed:', error);
