@@ -365,21 +365,26 @@ async function createContribution(contactInfo, transaction) {
   
   console.log('✅ Created contribution:', contributionId);
   
-  // Create/renew membership for campaign 195519
+// Create/renew membership for campaign 195519
   if (transaction.campaign_id === '195519') {
     let frequency = null;
     
+    // Extract plan_id from nested transactions array
+    const planId = transaction.plan_id || 
+                   (transaction.transactions && transaction.transactions[0] && transaction.transactions[0].plan_id);
+    
+    console.log('🔍 Plan ID:', planId);
+    
     // Fetch plan details if this is a recurring donation
-    if (transaction.plan_id) {
-      const planDetails = await getGivebutterPlan(transaction.plan_id);
+    if (planId) {
+      const planDetails = await getGivebutterPlan(planId);
       if (planDetails && planDetails.frequency) {
         frequency = planDetails.frequency;
       }
     }
     
     await createOrRenewMembership(contactInfo.id, contributionId, transaction, frequency);
-  }
-  
+  }  
   return result;
 }
 
