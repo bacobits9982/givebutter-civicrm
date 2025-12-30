@@ -153,6 +153,7 @@ async function updateContactLocalArea(contactId, localArea) {
 async function createOrRenewMembership(contactId, contributionId, transaction, frequency) {
   console.log('👥 Checking membership for contact:', contactId);
   console.log('📊 Frequency:', frequency);
+  console.log('📊 Is Recurring:', transaction.is_recurring);
   
   // Determine membership type based on frequency and is_recurring
   let membershipTypeId;
@@ -295,7 +296,8 @@ async function createContribution(contactInfo, transaction) {
   };
   
   const campaignFinancialTypeMapping = {
-    '195519': 'use_custom_field'
+    '195519': 'use_custom_field',
+    195519: 'use_custom_field'  // Handle both string and number
   };
   
   let financialTypeId = 49;
@@ -365,11 +367,11 @@ async function createContribution(contactInfo, transaction) {
   
   console.log('✅ Created contribution:', contributionId);
   
-// Create/renew membership for campaign 195519
-  if (transaction.campaign_id === '195519') {
+  // Create/renew membership for campaign 195519 (handle both string and number)
+  if (transaction.campaign_id == 195519) {
     let frequency = null;
     
-    // Extract plan_id from nested transactions array
+    // Extract plan_id from top level or nested transactions array
     const planId = transaction.plan_id || 
                    (transaction.transactions && transaction.transactions[0] && transaction.transactions[0].plan_id);
     
@@ -384,7 +386,8 @@ async function createContribution(contactInfo, transaction) {
     }
     
     await createOrRenewMembership(contactInfo.id, contributionId, transaction, frequency);
-  }  
+  }
+  
   return result;
 }
 
@@ -455,7 +458,7 @@ app.post('/test', async (req, res) => {
       id: 'test_' + Date.now(),
       amount: 25,
       transacted_at: new Date().toISOString(),
-      campaign_id: '195519',
+      campaign_id: 195519,  // Number, not string
       campaign_title: 'Test Campaign',
       first_name: 'Test',
       last_name: 'Donor',
